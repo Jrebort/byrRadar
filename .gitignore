@@ -1,0 +1,8 @@
+.env
+node_modules/
+tool-cache/
+dist/
+
+src-tauri/target/
+
+*.log

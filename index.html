@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>byrRadar</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand panel panel-hero">
+          <div>
+            <p class="eyebrow">Rust Core + Tauri Tray</p>
+            <h1>byrRadar</h1>
+          </div>
+          <div class="hero-meta">
+            <span id="mode-pill" class="pill">待机</span>
+            <p id="status-text">空闲</p>
+          </div>
+        </div>
+
+        <section class="panel panel-controls">
+          <div class="panel-head">
+            <h2>控制</h2>
+            <span id="config-path" class="microcopy"></span>
+          </div>
+          <div class="button-grid">
+            <button id="save-btn" class="accent">保存配置</button>
+            <button id="dry-run-btn">Dry Run</button>
+            <button id="start-btn">开始监控</button>
+            <button id="pause-btn">暂停</button>
+            <button id="resume-btn">恢复</button>
+            <button id="stop-btn" class="danger">停止</button>
+          </div>
+          <button id="hide-btn" class="ghost full">隐藏到托盘</button>
+        </section>
+
+        <form id="config-form" class="panel form-shell">
+          <fieldset id="config-fields">
+            <div class="panel-head">
+              <h2>配置</h2>
+              <span class="microcopy">直接调用 Rust 监控循环</span>
+            </div>
+
+            <div class="form-section">
+              <h3>BYR</h3>
+              <label>
+                <span>用户名</span>
+                <input id="byr-username" type="text" autocomplete="username" />
+              </label>
+              <label>
+                <span>密码</span>
+                <input id="byr-password" type="password" autocomplete="current-password" />
+              </label>
+            </div>
+
+            <div class="form-section">
+              <h3>qBittorrent</h3>
+              <label>
+                <span>Host</span>
+                <input id="qb-host" type="text" placeholder="http://127.0.0.1:8080" />
+              </label>
+              <label>
+                <span>用户名</span>
+                <input id="qb-username" type="text" />
+              </label>
+              <label>
+                <span>密码</span>
+                <input id="qb-password" type="password" />
+              </label>
+              <label>
+                <span>下载目录</span>
+                <input id="qb-download-path" type="text" placeholder="H:/BT" />
+              </label>
+            </div>
+
+            <div class="form-section">
+              <h3>规划</h3>
+              <label>
+                <span>下载预算（GB）</span>
+                <input id="download-budget" type="text" placeholder="200" />
+              </label>
+              <label>
+                <span>分类过滤</span>
+                <input id="include-categories" type="text" placeholder="电影,动漫,游戏" />
+              </label>
+            </div>
+          </fieldset>
+        </form>
+      </aside>
+
+      <main class="content">
+        <section id="error-banner" class="panel error-banner" hidden>
+          <div>
+            <p class="eyebrow">最近错误</p>
+            <strong id="error-text"></strong>
+          </div>
+        </section>
+
+        <header class="metrics-grid">
+          <div class="metric">
+            <span class="label">做种中</span>
+            <strong id="metric-seeding">0</strong>
+          </div>
+          <div class="metric">
+            <span class="label">是否排满</span>
+            <strong id="metric-saturated">否</strong>
+          </div>
+          <div class="metric">
+            <span class="label">剩余空间</span>
+            <strong id="metric-free">0 GiB</strong>
+          </div>
+          <div class="metric">
+            <span class="label">待写入</span>
+            <strong id="metric-pending">0 GiB</strong>
+          </div>
+          <div class="metric">
+            <span class="label">免费种数</span>
+            <strong id="metric-free-count">0</strong>
+          </div>
+          <div class="metric">
+            <span class="label">过滤后</span>
+            <strong id="metric-filtered">0</strong>
+          </div>
+          <div class="metric">
+            <span class="label">计划加种</span>
+            <strong id="metric-planned">0</strong>
+          </div>
+          <div class="metric">
+            <span class="label">粗规划</span>
+            <strong id="metric-rough-planned">0</strong>
+          </div>
+          <div class="metric">
+            <span class="label">重复跳过</span>
+            <strong id="metric-duplicates">0</strong>
+          </div>
+          <div class="metric">
+            <span class="label">已添加 / 跳过</span>
+            <strong id="metric-added">0 / 0</strong>
+          </div>
+        </header>
+
+        <section class="panel log-panel">
+          <div class="log-header">
+            <h2>日志</h2>
+            <span id="log-count">0 条</span>
+          </div>
+          <div id="logs" class="logs"></div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
