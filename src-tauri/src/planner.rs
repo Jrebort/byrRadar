@@ -1,4 +1,4 @@
-use crate::models::{PlannerConfig, SpaceSnapshot, TorrentInfo};
+use crate::models::{PlannerConfig, TorrentInfo};
 
 const KIB: u64 = 1024;
 const MIB: u64 = KIB * 1024;
@@ -63,61 +63,10 @@ pub fn find_appropriate_torrents(torrents: &[TorrentInfo]) -> Vec<TorrentInfo> {
     out
 }
 
-pub fn plan_downloads(
-    torrents: &[TorrentInfo],
-    planner: &PlannerConfig,
-    space: &SpaceSnapshot,
-    existing_names: &[String],
-) -> (Vec<TorrentInfo>, u64) {
-    let disk_limited_budget = space
-        .free_space_bytes
-        .saturating_sub(space.downloading_remaining_bytes)
-        .saturating_sub(planner.min_free_space_bytes);
-
-    let mut planning_budget = disk_limited_budget;
-    if let Some(limit) = planner.download_budget_bytes {
-        planning_budget = planning_budget.min(limit);
-    }
-
-    if planning_budget == 0 {
-        return (Vec::new(), 0);
-    }
-
+pub fn sort_torrents_by_priority(torrents: &[TorrentInfo]) -> Vec<TorrentInfo> {
     let mut sorted = torrents.to_vec();
     sorted.sort_by_key(priority_key);
-
-    let mut planned = Vec::new();
-    let mut remaining = planning_budget;
-    for torrent in sorted {
-        if existing_names
-            .iter()
-            .any(|name| torrent.title.contains(name) || name.contains(&torrent.seed_id))
-        {
-            println!(
-                "Planner skip: [{}] appears to already exist in qB",
-                torrent.seed_id
-            );
-            continue;
-        }
-        let Some(size_bytes) = torrent.size_bytes else {
-            println!(
-                "Planner skip: [{}] missing size_bytes from '{}'",
-                torrent.seed_id, torrent.size_text
-            );
-            continue;
-        };
-        if size_bytes > remaining {
-            println!(
-                "Planner skip: [{}] need={} remaining={}",
-                torrent.seed_id, size_bytes, remaining
-            );
-            continue;
-        }
-        remaining -= size_bytes;
-        planned.push(torrent);
-    }
-
-    (planned, planning_budget)
+    sorted
 }
 
 fn priority_key(t: &TorrentInfo) -> (i32, i64, i64, i32) {

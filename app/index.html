@@ -27,6 +27,7 @@
           </div>
           <div class="button-grid">
             <button id="save-btn" class="accent">保存配置</button>
+            <button id="adopt-btn">纳管已有种子</button>
             <button id="dry-run-btn">Dry Run</button>
             <button id="start-btn">开始监控</button>
             <button id="pause-btn">暂停</button>
@@ -86,6 +87,38 @@
                 <input id="include-categories" type="text" placeholder="电影,动漫,游戏" />
               </label>
             </div>
+
+            <div class="form-section">
+              <h3>轮换</h3>
+              <label class="toggle-row">
+                <span>自动删旧补新</span>
+                <input id="auto-rotate-enabled" type="checkbox" />
+              </label>
+              <label>
+                <span>最短保留时长（小时）</span>
+                <input id="min-seeding-hours-before-remove" type="text" placeholder="72" />
+              </label>
+              <label>
+                <span>低热度阈值（最多下载人数）</span>
+                <input id="max-leechers-for-stale" type="text" placeholder="1" />
+              </label>
+              <label>
+                <span>低上传阈值（KiB/s）</span>
+                <input id="max-recent-upspeed-kib" type="text" placeholder="50" />
+              </label>
+              <label>
+                <span>单轮最多删除</span>
+                <input id="max-remove-per-cycle" type="text" placeholder="3" />
+              </label>
+              <label>
+                <span>keep 关键字 / hash 片段</span>
+                <input id="keep-query" type="text" placeholder="电影名, hash片段" />
+              </label>
+              <div class="button-grid">
+                <button id="tag-keep-btn" type="button">标记 keep</button>
+                <button id="untag-keep-btn" type="button">取消 keep</button>
+              </div>
+            </div>
           </fieldset>
         </form>
       </aside>
@@ -134,6 +167,22 @@
           <div class="metric">
             <span class="label">重复跳过</span>
             <strong id="metric-duplicates">0</strong>
+          </div>
+          <div class="metric">
+            <span class="label">已纳管</span>
+            <strong id="metric-managed">0</strong>
+          </div>
+          <div class="metric">
+            <span class="label">已保护</span>
+            <strong id="metric-keep">0</strong>
+          </div>
+          <div class="metric">
+            <span class="label">可删旧资源</span>
+            <strong id="metric-cleanup-eligible">0</strong>
+          </div>
+          <div class="metric">
+            <span class="label">计划删除 / 释放</span>
+            <strong id="metric-cleanup-selected">0 / 0 GiB</strong>
           </div>
           <div class="metric">
             <span class="label">已添加 / 跳过</span>

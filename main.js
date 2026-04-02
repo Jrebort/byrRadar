@@ -19,6 +19,9 @@ const elements = {
   errorText: document.querySelector("#error-text"),
   buttons: {
     save: document.querySelector("#save-btn"),
+    adopt: document.querySelector("#adopt-btn"),
+    tagKeep: document.querySelector("#tag-keep-btn"),
+    untagKeep: document.querySelector("#untag-keep-btn"),
     dryRun: document.querySelector("#dry-run-btn"),
     start: document.querySelector("#start-btn"),
     pause: document.querySelector("#pause-btn"),
@@ -36,6 +39,10 @@ const elements = {
     planned: document.querySelector("#metric-planned"),
     roughPlanned: document.querySelector("#metric-rough-planned"),
     duplicates: document.querySelector("#metric-duplicates"),
+    managed: document.querySelector("#metric-managed"),
+    keep: document.querySelector("#metric-keep"),
+    cleanupEligible: document.querySelector("#metric-cleanup-eligible"),
+    cleanupSelected: document.querySelector("#metric-cleanup-selected"),
     added: document.querySelector("#metric-added"),
   },
   fields: {
@@ -47,6 +54,12 @@ const elements = {
     qbDownloadPath: document.querySelector("#qb-download-path"),
     downloadBudgetGb: document.querySelector("#download-budget"),
     includeCategories: document.querySelector("#include-categories"),
+    autoRotateEnabled: document.querySelector("#auto-rotate-enabled"),
+    minSeedingHoursBeforeRemove: document.querySelector("#min-seeding-hours-before-remove"),
+    maxLeechersForStale: document.querySelector("#max-leechers-for-stale"),
+    maxRecentUpspeedKib: document.querySelector("#max-recent-upspeed-kib"),
+    maxRemovePerCycle: document.querySelector("#max-remove-per-cycle"),
+    keepQuery: document.querySelector("#keep-query"),
   },
 };
 
@@ -87,6 +100,11 @@ function fillForm(config) {
   elements.fields.qbDownloadPath.value = config.qbDownloadPath ?? "";
   elements.fields.downloadBudgetGb.value = config.downloadBudgetGb ?? "";
   elements.fields.includeCategories.value = config.includeCategories ?? "";
+  elements.fields.autoRotateEnabled.checked = !!config.autoRotateEnabled;
+  elements.fields.minSeedingHoursBeforeRemove.value = config.minSeedingHoursBeforeRemove ?? "";
+  elements.fields.maxLeechersForStale.value = config.maxLeechersForStale ?? "";
+  elements.fields.maxRecentUpspeedKib.value = config.maxRecentUpspeedKib ?? "";
+  elements.fields.maxRemovePerCycle.value = config.maxRemovePerCycle ?? "";
 }
 
 function collectForm() {
@@ -99,6 +117,11 @@ function collectForm() {
     qbDownloadPath: elements.fields.qbDownloadPath.value,
     downloadBudgetGb: elements.fields.downloadBudgetGb.value,
     includeCategories: elements.fields.includeCategories.value,
+    autoRotateEnabled: elements.fields.autoRotateEnabled.checked,
+    minSeedingHoursBeforeRemove: elements.fields.minSeedingHoursBeforeRemove.value,
+    maxLeechersForStale: elements.fields.maxLeechersForStale.value,
+    maxRecentUpspeedKib: elements.fields.maxRecentUpspeedKib.value,
+    maxRemovePerCycle: elements.fields.maxRemovePerCycle.value,
   };
 }
 
@@ -121,6 +144,10 @@ function renderSnapshot(snapshot) {
   elements.metrics.planned.textContent = snapshot.report.plannedCount;
   elements.metrics.roughPlanned.textContent = snapshot.report.roughPlannedCount;
   elements.metrics.duplicates.textContent = snapshot.report.duplicateSkipCount;
+  elements.metrics.managed.textContent = snapshot.report.managedCount;
+  elements.metrics.keep.textContent = snapshot.report.keepCount;
+  elements.metrics.cleanupEligible.textContent = snapshot.report.cleanupEligibleCount;
+  elements.metrics.cleanupSelected.textContent = `${snapshot.report.cleanupSelectedCount} / ${formatBytes(snapshot.report.cleanupReclaimedBytes)}`;
   elements.metrics.added.textContent = `${snapshot.report.addedCount} / ${snapshot.report.skippedCount}`;
 
   elements.errorBanner.hidden = !snapshot.lastError;
@@ -128,6 +155,9 @@ function renderSnapshot(snapshot) {
 
   elements.configFields.disabled = snapshot.running;
   elements.buttons.save.disabled = snapshot.running;
+  elements.buttons.adopt.disabled = snapshot.running;
+  elements.buttons.tagKeep.disabled = snapshot.running;
+  elements.buttons.untagKeep.disabled = snapshot.running;
   elements.buttons.dryRun.disabled = snapshot.running;
   elements.buttons.start.disabled = snapshot.running;
   elements.buttons.pause.disabled = !snapshot.running || snapshot.paused;
@@ -169,12 +199,30 @@ async function init() {
     await invokeAndRender("save_config", { form: collectForm() });
   });
 
+  elements.buttons.adopt.addEventListener("click", async () => {
+    await invokeAndRender("adopt_existing_torrents", { form: collectForm() });
+  });
+
+  elements.buttons.tagKeep.addEventListener("click", async () => {
+    await invokeAndRender("tag_keep_targets", {
+      form: collectForm(),
+      query: elements.fields.keepQuery.value,
+    });
+  });
+
+  elements.buttons.untagKeep.addEventListener("click", async () => {
+    await invokeAndRender("untag_keep_targets", {
+      form: collectForm(),
+      query: elements.fields.keepQuery.value,
+    });
+  });
+
   elements.buttons.dryRun.addEventListener("click", async () => {
-    await invokeAndRender("start_monitor", { dryRun: true });
+    await invokeAndRender("start_monitor", { form: collectForm(), dryRun: true });
   });
 
   elements.buttons.start.addEventListener("click", async () => {
-    await invokeAndRender("start_monitor", { dryRun: false });
+    await invokeAndRender("start_monitor", { form: collectForm(), dryRun: false });
   });
 
   elements.buttons.pause.addEventListener("click", async () => {

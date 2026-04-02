@@ -215,6 +215,18 @@ label + label {
   margin-top: 12px;
 }
 
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.toggle-row input[type="checkbox"] {
+  width: 20px;
+  min-height: 20px;
+}
+
 label span {
   display: block;
   margin-bottom: 6px;

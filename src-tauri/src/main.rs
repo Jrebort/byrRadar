@@ -6,6 +6,7 @@ mod http;
 mod models;
 mod planner;
 mod qb_client;
+mod rotation;
 mod runner;
 
 use config::ConfigForm;
@@ -21,6 +22,11 @@ use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, State,
+};
+use crate::qb_client::QbClient;
+use crate::rotation::{
+    count_keep_torrents, count_managed_torrents, select_adoption_pool, select_cleanup_pool,
+    select_keep_targets, KEEP_TAG, MANAGED_TAG,
 };
 
 const LOG_EVENT: &str = "monitor-log";
@@ -84,6 +90,11 @@ struct ReportView {
     added_count: usize,
     skipped_count: usize,
     duplicate_skip_count: usize,
+    cleanup_eligible_count: usize,
+    cleanup_selected_count: usize,
+    cleanup_reclaimed_bytes: u64,
+    managed_count: usize,
+    keep_count: usize,
     budget_bytes: u64,
     free_space_bytes: u64,
     downloading_remaining_bytes: u64,
@@ -102,6 +113,11 @@ impl From<&RunReport> for ReportView {
             added_count: report.added_count,
             skipped_count: report.skipped_count,
             duplicate_skip_count: report.duplicate_skip_count,
+            cleanup_eligible_count: report.cleanup_eligible_count,
+            cleanup_selected_count: report.cleanup_selected_count,
+            cleanup_reclaimed_bytes: report.cleanup_reclaimed_bytes,
+            managed_count: report.managed_count,
+            keep_count: report.keep_count,
             budget_bytes: report.budget_bytes,
             free_space_bytes: report.free_space_bytes,
             downloading_remaining_bytes: report.downloading_remaining_bytes,
@@ -161,15 +177,100 @@ fn save_config(
 }
 
 #[tauri::command]
+fn tag_keep_targets(
+    app: AppHandle,
+    state: State<'_, SharedState>,
+    form: ConfigForm,
+    query: String,
+) -> Result<Snapshot, String> {
+    sync_form_to_state(&state, &form);
+    form.apply_process_env();
+    update_keep_targets(&app, &state, query, true)
+}
+
+#[tauri::command]
+fn untag_keep_targets(
+    app: AppHandle,
+    state: State<'_, SharedState>,
+    form: ConfigForm,
+    query: String,
+) -> Result<Snapshot, String> {
+    sync_form_to_state(&state, &form);
+    form.apply_process_env();
+    update_keep_targets(&app, &state, query, false)
+}
+
+#[tauri::command]
+fn adopt_existing_torrents(
+    app: AppHandle,
+    state: State<'_, SharedState>,
+    form: ConfigForm,
+) -> Result<Snapshot, String> {
+    {
+        let runtime = state.runtime.lock().expect("runtime mutex poisoned");
+        if runtime.running {
+            return Err("监控运行中，不能执行纳管".to_string());
+        }
+    }
+
+    sync_form_to_state(&state, &form);
+    form.apply_process_env();
+    let config = form.into_qb_only_config().map_err(|err| err.to_string())?;
+
+    push_log(&app, "开始纳管已有种子".to_string());
+    let qb = QbClient::login(&config).map_err(|err| err.to_string())?;
+    let qb_torrents = qb.torrents_info().map_err(|err| err.to_string())?;
+    let adoption_pool = select_adoption_pool(&qb_torrents);
+
+    if adoption_pool.is_empty() {
+        push_log(&app, "纳管完成：没有可纳管的已有种子".to_string());
+        emit_snapshot(&app);
+        return Ok(snapshot_from_state(&state));
+    }
+
+    let hashes = adoption_pool
+        .iter()
+        .map(|torrent| torrent.hash.clone())
+        .collect::<Vec<_>>();
+    qb.add_tags(&hashes, &[MANAGED_TAG])
+        .map_err(|err| err.to_string())?;
+
+    push_log(
+        &app,
+        format!(
+            "纳管完成：已接管 {} 个已有种子并打上 {} tag",
+            adoption_pool.len(),
+            MANAGED_TAG
+        ),
+    );
+    for torrent in adoption_pool.iter().take(12) {
+        push_log(
+            &app,
+            format!("Adopted: [{}][{} bytes] {}", torrent.hash, torrent.total_size, torrent.name),
+        );
+    }
+    if adoption_pool.len() > 12 {
+        push_log(
+            &app,
+            format!("Adopted: ... 其余 {} 个种子未展开", adoption_pool.len() - 12),
+        );
+    }
+
+    let refreshed = qb.torrents_info().map_err(|err| err.to_string())?;
+    refresh_report_from_qb(&state, &refreshed).map_err(|err| err.to_string())?;
+
+    emit_snapshot(&app);
+    Ok(snapshot_from_state(&state))
+}
+
+#[tauri::command]
 fn start_monitor(
     app: AppHandle,
     state: State<'_, SharedState>,
+    form: ConfigForm,
     dry_run: bool,
 ) -> Result<Snapshot, String> {
-    let form = {
-        let current = state.config.lock().expect("config mutex poisoned");
-        current.clone()
-    };
+    sync_form_to_state(&state, &form);
     form.apply_process_env();
     let config = form.into_core_config(dry_run).map_err(|err| err.to_string())?;
 
@@ -222,6 +323,90 @@ fn resume_monitor(app: AppHandle, state: State<'_, SharedState>) -> Snapshot {
 fn stop_monitor(app: AppHandle, state: State<'_, SharedState>) -> Snapshot {
     stop_monitor_impl(&app);
     snapshot_from_state(&state)
+}
+
+fn update_keep_targets(
+    app: &AppHandle,
+    state: &State<'_, SharedState>,
+    query: String,
+    add_keep: bool,
+) -> Result<Snapshot, String> {
+    {
+        let runtime = state.runtime.lock().expect("runtime mutex poisoned");
+        if runtime.running {
+            return Err("监控运行中，不能修改 keep 标记".to_string());
+        }
+    }
+
+    let trimmed_query = query.trim().to_string();
+    if trimmed_query.is_empty() {
+        return Err("请输入名称关键字或 hash 片段".to_string());
+    }
+
+    let form = {
+        let current = state.config.lock().expect("config mutex poisoned");
+        current.clone()
+    };
+    form.apply_process_env();
+    let config = form.into_qb_only_config().map_err(|err| err.to_string())?;
+
+    let action_label = if add_keep { "标记 keep" } else { "取消 keep" };
+    push_log(app, format!("开始执行：{} | {}", action_label, trimmed_query));
+
+    let qb = QbClient::login(&config).map_err(|err| err.to_string())?;
+    let qb_torrents = qb.torrents_info().map_err(|err| err.to_string())?;
+    let targets = select_keep_targets(
+        &qb_torrents,
+        &trimmed_query,
+        Some(!add_keep),
+    );
+
+    if targets.is_empty() {
+        push_log(app, format!("{}完成：没有匹配到可操作的种子", action_label));
+        emit_snapshot(app);
+        return Ok(snapshot_from_state(state));
+    }
+
+    let hashes = targets
+        .iter()
+        .map(|torrent| torrent.hash.clone())
+        .collect::<Vec<_>>();
+
+    if add_keep {
+        qb.add_tags(&hashes, &[KEEP_TAG])
+            .map_err(|err| err.to_string())?;
+    } else {
+        qb.remove_tags(&hashes, &[KEEP_TAG])
+            .map_err(|err| err.to_string())?;
+    }
+
+    push_log(
+        app,
+        format!(
+            "{}完成：{} 个种子已{} {} tag",
+            action_label,
+            targets.len(),
+            if add_keep { "添加" } else { "移除" },
+            KEEP_TAG
+        ),
+    );
+    for torrent in targets.iter().take(12) {
+        push_log(
+            app,
+            format!("{}: [{}] {}", action_label, torrent.hash, torrent.name),
+        );
+    }
+    if targets.len() > 12 {
+        push_log(
+            app,
+            format!("{}: ... 其余 {} 个种子未展开", action_label, targets.len() - 12),
+        );
+    }
+
+    let refreshed = qb.torrents_info().map_err(|err| err.to_string())?;
+    refresh_report_from_qb(state, &refreshed).map_err(|err| err.to_string())?;
+    emit_snapshot(app);
+    Ok(snapshot_from_state(state))
 }
 
 fn monitor_loop(
@@ -372,6 +557,42 @@ fn update_report(app: &AppHandle, report: &RunReport) {
     let state = app.state::<SharedState>();
     let mut runtime = state.runtime.lock().expect("runtime mutex poisoned");
     runtime.report = ReportView::from(report);
+}
+
+fn sync_form_to_state(state: &State<'_, SharedState>, form: &ConfigForm) {
+    let mut current = state.config.lock().expect("config mutex poisoned");
+    *current = form.clone();
+}
+
+fn refresh_report_from_qb(
+    state: &State<'_, SharedState>,
+    qb_torrents: &[crate::models::QbTorrent],
+) -> Result<(), anyhow::Error> {
+    let form = {
+        let current = state.config.lock().expect("config mutex poisoned");
+        current.clone()
+    };
+    let config = form.into_qb_only_config()?;
+    let seeding_count = qb_torrents
+        .iter()
+        .filter(|torrent| {
+            matches!(
+                torrent.state.as_str(),
+                "uploading" | "stalledUP" | "queuedUP" | "forcedUP"
+            )
+        })
+        .count();
+    let managed_count = count_managed_torrents(qb_torrents);
+    let keep_count = count_keep_torrents(qb_torrents);
+    let cleanup_eligible_count = select_cleanup_pool(qb_torrents, &config).len();
+
+    let mut runtime = state.runtime.lock().expect("runtime mutex poisoned");
+    runtime.report.total_torrents = qb_torrents.len();
+    runtime.report.seeding_count = seeding_count;
+    runtime.report.managed_count = managed_count;
+    runtime.report.keep_count = keep_count;
+    runtime.report.cleanup_eligible_count = cleanup_eligible_count;
+    Ok(())
 }
 
 fn set_status(app: &AppHandle, status: &str) {
@@ -666,6 +887,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             load_app_state,
             save_config,
+            tag_keep_targets,
+            untag_keep_targets,
+            adopt_existing_torrents,
             start_monitor,
             pause_monitor,
             resume_monitor,

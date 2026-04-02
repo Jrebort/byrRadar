@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::config::Config;
 use crate::models::{QbTorrent, SpaceSnapshot};
+use crate::rotation::MANAGED_TAG;
 
 pub struct QbClient {
     client: Client,
@@ -32,9 +33,14 @@ struct TorrentDto {
     hash: String,
     state: String,
     tags: Option<String>,
+    added_on: Option<i64>,
     total_size: Option<u64>,
     size: Option<u64>,
     completed: Option<u64>,
+    upspeed: Option<u64>,
+    num_leechs: Option<i32>,
+    num_seeds: Option<i32>,
+    progress: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -148,8 +154,14 @@ impl QbClient {
                 name: t.name,
                 hash: t.hash,
                 state: t.state,
+                tags: t.tags.unwrap_or_default(),
                 total_size: t.total_size.or(t.size).unwrap_or(0),
                 completed: t.completed.unwrap_or(0),
+                added_on: t.added_on.unwrap_or_default(),
+                upspeed: t.upspeed.unwrap_or_default(),
+                num_leechs: t.num_leechs.unwrap_or(-1),
+                num_seeds: t.num_seeds.unwrap_or(-1),
+                progress: t.progress.unwrap_or_default(),
             })
             .collect())
     }
@@ -172,6 +184,7 @@ impl QbClient {
         }
 
         let unique_tag = format!("temp_{}", Uuid::new_v4().simple());
+        let tags = format!("{},{}", unique_tag, MANAGED_TAG);
 
         let part = reqwest::blocking::multipart::Part::bytes(torrent_bytes)
             .file_name(format!("{torrent_id}.torrent"))
@@ -181,7 +194,7 @@ impl QbClient {
             .part("torrents", part)
             .text("savepath", save_path.to_string())
             .text("paused", if paused { "true" } else { "false" }.to_string())
-            .text("tags", unique_tag.clone());
+            .text("tags", tags);
 
         let response = self
             .client
@@ -241,6 +254,68 @@ impl QbClient {
         Ok(())
     }
 
+    pub fn delete_torrents(&self, hashes: &[String], delete_files: bool) -> Result<()> {
+        if hashes.is_empty() {
+            return Ok(());
+        }
+
+        let joined = hashes.join("|");
+        self.client
+            .post(format!("{}/api/v2/torrents/delete", self.base))
+            .form(&[
+                ("hashes", joined.as_str()),
+                (
+                    "deleteFiles",
+                    if delete_files { "true" } else { "false" },
+                ),
+            ])
+            .send()
+            .context("failed to delete qB torrents")?
+            .error_for_status()
+            .context("qB delete endpoint returned error status")?;
+        Ok(())
+    }
+
+    pub fn add_tags(&self, hashes: &[String], tags: &[&str]) -> Result<()> {
+        if hashes.is_empty() || tags.is_empty() {
+            return Ok(());
+        }
+
+        let joined_hashes = hashes.join("|");
+        let joined_tags = tags.join(",");
+        self.client
+            .post(format!("{}/api/v2/torrents/addTags", self.base))
+            .form(&[
+                ("hashes", joined_hashes.as_str()),
+                ("tags", joined_tags.as_str()),
+            ])
+            .send()
+            .context("failed to add qB tags")?
+            .error_for_status()
+            .context("qB addTags endpoint returned error status")?;
+        Ok(())
+    }
+
+    pub fn remove_tags(&self, hashes: &[String], tags: &[&str]) -> Result<()> {
+        if hashes.is_empty() || tags.is_empty() {
+            return Ok(());
+        }
+
+        let joined_hashes = hashes.join("|");
+        let joined_tags = tags.join(",");
+        self.client
+            .post(format!("{}/api/v2/torrents/removeTags", self.base))
+            .form(&[
+                ("hashes", joined_hashes.as_str()),
+                ("tags", joined_tags.as_str()),
+            ])
+            .send()
+            .context("failed to remove qB tags")?
+            .error_for_status()
+            .context("qB removeTags endpoint returned error status")?;
+        Ok(())
+    }
+
     fn find_torrent_by_tag(&self, tag: &str) -> Result<Option<QbTorrent>> {
         let items: Vec<TorrentDto> = self
             .client
@@ -257,8 +332,14 @@ impl QbClient {
             name: t.name,
             hash: t.hash,
             state: t.state,
+            tags: t.tags.unwrap_or_default(),
             total_size: t.total_size.or(t.size).unwrap_or(0),
             completed: t.completed.unwrap_or(0),
+            added_on: t.added_on.unwrap_or_default(),
+            upspeed: t.upspeed.unwrap_or_default(),
+            num_leechs: t.num_leechs.unwrap_or(-1),
+            num_seeds: t.num_seeds.unwrap_or(-1),
+            progress: t.progress.unwrap_or_default(),
         }))
     }
 

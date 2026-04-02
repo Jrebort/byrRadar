@@ -54,6 +54,12 @@ pub struct QbTorrent {
     pub name: String,
     pub hash: String,
     pub state: String,
+    pub tags: String,
     pub total_size: u64,
     pub completed: u64,
+    pub added_on: i64,
+    pub upspeed: u64,
+    pub num_leechs: i32,
+    pub num_seeds: i32,
+    pub progress: f64,
 }
